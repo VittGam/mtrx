@@ -1,6 +1,7 @@
 # mtrx
 
-**Transmit and receive audio via UDP unicast or multicast.**
+**Transmit and receive audio via UDP unicast or multicast, using the Opus codec.**
+
 **Copyright (C) 2014-2016 Vittorio Gambaletta**
 
 ## mtx
