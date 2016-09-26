@@ -85,6 +85,8 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 
+	set_realtime_prio();
+
 	snd_pcm_uframes_t samples = audio_packet_duration * rate / 1000;
 	size_t pcm_size_multiplier = (use_float ? sizeof(float) : sizeof(int16_t)) * channels;
 	size_t pcm_size = samples * pcm_size_multiplier;
@@ -112,7 +114,6 @@ int main(int argc, char *argv[]) {
 	struct timespec clock = {0, 0};
 	int resync = 1;
 
-	set_realtime_prio();
 	drop_privs_if_needed();
 
 	while (1) {

@@ -274,6 +274,8 @@ int main(int argc, char *argv[]) {
 
 	int sock = init_socket();
 
+	set_realtime_prio();
+
 	pthread_barrier_init(&init_barrier, NULL, 2);
 
 	int ret;
@@ -292,7 +294,6 @@ int main(int argc, char *argv[]) {
 	pthread_barrier_wait(&init_barrier);
 	pthread_barrier_destroy(&init_barrier);
 
-	set_realtime_prio();
 	drop_privs_if_needed();
 
 	while (1) {
