@@ -297,8 +297,13 @@ int main(int argc, char *argv[]) {
 	drop_privs_if_needed();
 
 	while (1) {
+		errno = 0;
 		int plen = recv(sock, NULL, 0, MSG_PEEK | MSG_TRUNC);
-		if (plen <= offsetof(struct azzp, data)) {
+		if (errno == EFAULT && ioctl(sock, FIONREAD, &plen)) {
+			perror("ioctl(FIONREAD)");
+			exit(1);
+		}
+		if (plen <= 0 || plen <= offsetof(struct azzp, data)) {
 			perror("recv(PEEK)");
 			exit(1);
 		}
