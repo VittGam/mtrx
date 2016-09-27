@@ -68,6 +68,10 @@ pcm.pnm {
 - On OpenWrt and/or with cheap USB audio cards without PulseAudio, if it doesn't work try **`mrx -d plughw:0,0`**
 - It shouldn't be needed anymore, but it might still be useful, so [this is a working `/etc/asound.conf` file for OpenWrt with cheap USB audio cards](https://gist.github.com/VittGam/ad0c1ce0143e4fb7a55fe8947b085e26)
 
+## Notes
+
+- The wall clock of the transmitter and receivers must be well synchronized (with ntp ideally) or mtrx won't work correctly.
+
 ## Bugs
 
 - Well, all the desync bugs seem to happen (and needed a resync hack in `mtx`) only when using `alsa-pulse` to capture from the null output sink monitor...
