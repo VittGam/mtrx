@@ -79,6 +79,7 @@ pcm.pnm {
 
 ## TODO
 
+- Support IPv6
 - Implement native PulseAudio interface (but only if it doesn't bloat the program! The target is embedded systems like OpenWrt routers...)
 - OpenWrt/LEDE packaging
 - On OpenWrt, `libopus` is compiled with floating point enabled by default, and since floating point is emulated on most routers' CPUs, it's SLOW as hell. Maybe send a patch to LEDE (if that was not already done in the meantime)?
