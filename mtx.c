@@ -100,7 +100,7 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 	opus_encoder_ctl(encoder, OPUS_SET_BITRATE(kbps * 1000));
-	opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(10));
+	opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(9));
 
 	snd_pcm_t *snd = NULL;
 	snd_pcm_uframes_t buffer = samples;
