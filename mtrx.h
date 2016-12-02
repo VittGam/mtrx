@@ -147,7 +147,7 @@ static snd_pcm_t *snd_my_init(char *device, int direction, unsigned long int rat
 	snd_callcheck(snd_pcm_hw_params_set_buffer_size_near, snd, hw, buffer);
 	snd_callcheck(snd_pcm_hw_params, snd, hw);
 	snd_callcheck(snd_pcm_sw_params_current, snd, sw);
-	snd_callcheck(snd_pcm_sw_params_set_start_threshold, snd, sw, *buffer);
+	snd_callcheck(snd_pcm_sw_params_set_start_threshold, snd, sw, direction == SND_PCM_STREAM_PLAYBACK ? *buffer : samples);
 	snd_callcheck(snd_pcm_sw_params_set_stop_threshold, snd, sw, direction == SND_PCM_STREAM_PLAYBACK ? *buffer - samples : *buffer);
 	snd_callcheck(snd_pcm_sw_params, snd, sw);
 	return snd;
