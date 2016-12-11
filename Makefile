@@ -21,7 +21,7 @@ mtx:		mtx.c
 mrx:		mrx.c
 
 install:	mtx mrx
-		$(INSTALL) -D -s mtx mrx $(DESTDIR)$(BINDIR)
+		$(INSTALL) -D -s mtx mrx -t $(DESTDIR)$(BINDIR)
 
 clean:
 		rm -f mtx mrx
