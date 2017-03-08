@@ -157,6 +157,9 @@ static void *audio_playback_thread(void *arg) {
 			int retval = snd_pcm_writei(snd, pcm, samples);
 			if (retval == -11) {
 				printverbose("Zero write, %d < %lu\n", retval, samples);
+				if (availp == samples - 1) {
+					snd_pcm_prepare(snd);
+				}
 			} else if (retval < 0) {
 				printverbose("recovering %d\n", retval);
 				snd_callcheck2(snd_pcm_recover, "snd_pcm_writei", retval, snd, retval, 0);
