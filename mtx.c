@@ -27,7 +27,40 @@ unsigned long int channels = 2;
 unsigned long int audio_packet_duration = 20;
 unsigned long int kbps = 128;
 unsigned long int buffermult = 3;
+unsigned long int enable_time_sync = 1;
 unsigned long int verbose = 0;
+
+static void *time_sync_thread(void *arg) {
+	printverbose("Time sync thread started\n");
+
+	int sock = *(int *)arg;
+
+	while (1) {
+		struct timep2 timepacket;
+		struct sockaddr_in addrin;
+		unsigned int addrinlen = sizeof(addrin);
+		memset(&addrin, 0, sizeof(addrin));
+
+		errno = 0;
+		int plen = recvfrom(sock, &timepacket, sizeof(struct timep), 0, (struct sockaddr *) &addrin, &addrinlen);
+		if (plen != sizeof(struct timep) || addrinlen != sizeof(addrin)) {
+			perror("recvfrom");
+			continue;
+		}
+
+		struct timespec now;
+		clock_gettime(CLOCK_REALTIME, &now);
+		timepacket.t2.tv_sec = htobe64(now.tv_sec);
+		timepacket.t2.tv_nsec = htobe32(now.tv_nsec);
+
+		if (sendto(sock, &timepacket, sizeof(struct timep2), 0, (struct sockaddr *) &addrin, sizeof(addrin)) < 0) {
+			perror("sendto");
+		}
+	}
+
+	pthread_exit(NULL);
+	return NULL;
+}
 
 int main(int argc, char *argv[]) {
 	fprintf(stderr, "mtx - Transmit audio via UDP unicast or multicast\nCopyright (C) 2014-2016 Vittorio Gambaletta <openwrt@vittgam.net>\n\n");
@@ -54,6 +87,8 @@ int main(int argc, char *argv[]) {
 			kbps = strtoul(optarg, NULL, 10);
 		} else if (c == 'b') {
 			buffermult = strtoul(optarg, NULL, 10);
+		} else if (c == 'T') {
+			enable_time_sync = strtoul(optarg, NULL, 10);
 		} else if (c == 'v') {
 			verbose = strtoul(optarg, NULL, 10);
 		} else {
@@ -67,6 +102,7 @@ int main(int argc, char *argv[]) {
 			fprintf(stderr, "    -t <ms>     Audio packet duration (default: %lu ms)\n", audio_packet_duration);
 			fprintf(stderr, "    -k <kbps>   Network bitrate (default: %lu kbps)\n", kbps);
 			fprintf(stderr, "    -b <n>      ALSA buffer multiplier (default: %lu)\n", buffermult);
+			fprintf(stderr, "    -T <n>      Enable or disable time synchronization (default: %lu)\n", enable_time_sync);
 			fprintf(stderr, "    -v <n>      Be verbose (default: %lu)\n", verbose);
 			fprintf(stderr, "\n");
 			exit(1);
@@ -85,7 +121,32 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 
+	{
+		struct sockaddr_in addrin;
+		memset(&addrin, 0, sizeof(addrin));
+		addrin.sin_family = AF_INET;
+		addrin.sin_addr.s_addr = htonl(INADDR_ANY);
+		addrin.sin_port = 0;
+		if (bind(sock, (struct sockaddr *) &addrin, sizeof(addrin)) < 0) {
+			perror("bind");
+			exit(1);
+		}
+	}
+
 	set_realtime_prio();
+
+	if (enable_time_sync) {
+		int ret;
+		pthread_t ths1;
+		pthread_attr_t thattr1;
+		pthread_attr_init(&thattr1);
+		pthread_attr_setdetachstate(&thattr1, PTHREAD_CREATE_DETACHED);
+		if ((ret = pthread_create(&ths1, &thattr1, time_sync_thread, (void *)&sock)) != 0) {
+			fprintf(stderr, "Error while calling pthread_create() for time sync thread: error %d (%s)\n", ret, strerror(ret));
+			exit(1);
+		}
+		pthread_attr_destroy(&thattr1);
+	}
 
 	snd_pcm_uframes_t samples = audio_packet_duration * rate / 1000;
 	size_t pcm_size_multiplier = (use_float ? sizeof(float) : sizeof(int16_t)) * channels;
@@ -109,7 +170,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	void *pcm = alloca(pcm_size);
-	struct azzp *packet = alloca(bytes_per_frame + offsetof(struct azzp, data));
+	struct azzp *packet = alloca(bytes_per_frame + sizeof(struct timep));
 
 	struct timespec clock = {0, 0};
 	int resync = 1;
@@ -207,7 +268,7 @@ int main(int argc, char *argv[]) {
 		packet->tv_sec = htobe64(now.tv_sec);
 		packet->tv_nsec = htobe32(now.tv_nsec);
 
-		if (sendto(sock, packet, z + offsetof(struct azzp, data), 0, (struct sockaddr *) &addrin, sizeof(addrin)) < 0) {
+		if (sendto(sock, packet, z + sizeof(struct timep), 0, (struct sockaddr *) &addrin, sizeof(addrin)) < 0) {
 			perror("sendto");
 			exit(1);
 		}

@@ -41,6 +41,15 @@ struct __attribute__((__packed__)) azzp {
 	unsigned char data;
 };
 
+struct __attribute__((__packed__)) timep {
+	int64_t tv_sec;
+	uint32_t tv_nsec;
+};
+
+struct __attribute__((__packed__)) timep2 {
+	struct timep t1, t2;
+};
+
 struct azz {
 	struct azz *next;
 	uint32_t datalen;
@@ -70,25 +79,12 @@ struct mapporc {
 }
 
 #define timeadd(time, nsecs1) { \
-	int64_t __tmp_nsecs = (nsecs1); \
-	if (__tmp_nsecs > 0) { \
-		time.tv_nsec += __tmp_nsecs; \
-		while (time.tv_nsec >= 1000000000) { \
-			time.tv_sec++; \
-			time.tv_nsec -= 1000000000; \
-		} \
-	} else if (__tmp_nsecs < 0) { \
-		__tmp_nsecs = -__tmp_nsecs; \
-		while (__tmp_nsecs >= 1000000000) { \
-			time.tv_sec--; \
-			__tmp_nsecs -= 1000000000; \
-		} \
-		if (time.tv_nsec < __tmp_nsecs) { \
-			time.tv_sec--; \
-			time.tv_nsec += 1000000000 - __tmp_nsecs; \
-		} else { \
-			time.tv_nsec -= __tmp_nsecs; \
-		} \
+	int64_t __tmp_nsecs = (int64_t)(nsecs1) + (int64_t)time.tv_nsec; \
+	time.tv_sec += __tmp_nsecs / 1000000000; \
+	time.tv_nsec = __tmp_nsecs % 1000000000; \
+	if (__tmp_nsecs < 0) { \
+		time.tv_sec--; \
+		time.tv_nsec += 1000000000; \
 	} \
 }
 

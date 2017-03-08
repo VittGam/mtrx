@@ -27,11 +27,13 @@ unsigned long int channels = 2;
 unsigned long int audio_packet_duration = 20;
 unsigned long int buffermult = 3;
 signed long int delay = 80;
+unsigned long int enable_time_sync = 1;
 unsigned long int verbose = 0;
 
 struct azz *audio_buffer = NULL;
-pthread_mutex_t audio_mutex;
+pthread_mutex_t audio_mutex, time_mutex;
 struct timespec last_packet_clock = {0, 0};
+int64_t server_time_diff_global = 0;
 
 pthread_barrier_t init_barrier;
 
@@ -73,8 +75,14 @@ static void *audio_playback_thread(void *arg) {
 	while (1) {
 		struct azz *currframe = NULL;
 
+		int64_t server_time_diff;
+		pthread_mutex_lock(&time_mutex);
+		server_time_diff = server_time_diff_global;
+		pthread_mutex_unlock(&time_mutex);
+
 		struct timespec now;
 		clock_gettime(CLOCK_REALTIME, &now);
+		timeadd(now, server_time_diff);
 		timeadd(now, clock_period);
 		timeadd(now, -delay1);
 		now.tv_nsec /= clock_period;
@@ -84,7 +92,9 @@ static void *audio_playback_thread(void *arg) {
 			timeadd(now, clock_period);
 		}
 		clock = now;
+		timeadd(now, -server_time_diff);
 		while (clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &now, NULL) == EINTR);
+		timeadd(now, server_time_diff);
 		timeadd(now, delay2);
 
 		snd_pcm_sframes_t availp, delayp;
@@ -111,6 +121,7 @@ static void *audio_playback_thread(void *arg) {
 		if (verbose) {
 			struct timespec now2;
 			clock_gettime(CLOCK_REALTIME, &now2);
+			timeadd(now2, server_time_diff);
 			printverbose("%d clock %ld.%09lu now2 %ld.%09lu, avail_delay %6ld %6ld %6ld, delay %"PRId64" %"PRId64"\n", snd_pcm_state(snd), now.tv_sec, now.tv_nsec, now2.tv_sec, now2.tv_nsec, availp, delayp, availp + delayp, delay1, delay2);
 		}
 
@@ -187,6 +198,7 @@ static void *audio_playback_thread(void *arg) {
 	opus_decoder_destroy(decoder);
 
 	pthread_mutex_destroy(&audio_mutex);
+	pthread_mutex_destroy(&time_mutex);
 	pthread_exit(NULL);
 	return NULL;
 }
@@ -208,6 +220,12 @@ static int init_socket() {
 			perror("setsockopt(SO_REUSEADDR)");
 			exit(1);
 		}
+	}
+
+	unsigned int iptos = IPTOS_DSCP_EF;
+	if (setsockopt(sock, IPPROTO_IP, IP_TOS, &iptos, sizeof(iptos)) < 0) {
+		perror("setsockopt(IP_TOS)");
+		exit(1);
 	}
 
 	struct sockaddr_in addrin;
@@ -235,7 +253,7 @@ int main(int argc, char *argv[]) {
 	fprintf(stderr, "mrx - Receive audio via UDP unicast or multicast\nCopyright (C) 2014-2016 Vittorio Gambaletta <openwrt@vittgam.net>\n\n");
 
 	while (1) {
-		int c = getopt(argc, argv, "h:p:d:f:r:c:t:b:e:v:");
+		int c = getopt(argc, argv, "h:p:d:f:r:c:t:b:e:T:v:");
 		if (c == -1) {
 			break;
 		} else if (c == 'h') {
@@ -256,6 +274,8 @@ int main(int argc, char *argv[]) {
 			buffermult = strtoul(optarg, NULL, 10);
 		} else if (c == 'e') {
 			delay = strtol(optarg, NULL, 10);
+		} else if (c == 'T') {
+			enable_time_sync = strtoul(optarg, NULL, 10);
 		} else if (c == 'v') {
 			verbose = strtoul(optarg, NULL, 10);
 		} else {
@@ -269,6 +289,7 @@ int main(int argc, char *argv[]) {
 			fprintf(stderr, "    -t <ms>     Audio packet duration (default: %lu ms)\n", audio_packet_duration);
 			fprintf(stderr, "    -b <n>      ALSA buffer multiplier (default: %lu)\n", buffermult);
 			fprintf(stderr, "    -e <ms>     Audio total delay (default: %ld ms)\n", delay);
+			fprintf(stderr, "    -T <n>      Enable or disable time synchronization (default: %lu)\n", enable_time_sync);
 			fprintf(stderr, "    -v <n>      Be verbose (default: %lu)\n", verbose);
 			fprintf(stderr, "\n");
 			exit(1);
@@ -286,6 +307,7 @@ int main(int argc, char *argv[]) {
 	pthread_attr_t thattr1;
 
 	pthread_mutex_init(&audio_mutex, NULL);
+	pthread_mutex_init(&time_mutex, NULL);
 	pthread_attr_init(&thattr1);
 	pthread_attr_setdetachstate(&thattr1, PTHREAD_CREATE_DETACHED);
 	if ((ret = pthread_create(&ths1, &thattr1, audio_playback_thread, NULL)) != 0) {
@@ -299,14 +321,21 @@ int main(int argc, char *argv[]) {
 
 	drop_privs_if_needed();
 
+	struct timespec last_time_sent;
+	memset(&last_time_sent, 0, sizeof(last_time_sent));
+
 	while (1) {
+		struct sockaddr_in addrin;
+		unsigned int addrinlen = sizeof(addrin);
+		memset(&addrin, 0, sizeof(addrin));
+
 		errno = 0;
 		int plen = recv(sock, NULL, 0, MSG_PEEK | MSG_TRUNC);
 		if (errno == EFAULT && ioctl(sock, FIONREAD, &plen)) {
 			perror("ioctl(FIONREAD)");
 			exit(1);
 		}
-		if (plen <= 0 || plen <= offsetof(struct azzp, data)) {
+		if (plen <= 0 || plen <= sizeof(struct timep)) {
 			perror("recv(PEEK)");
 			exit(1);
 		}
@@ -317,16 +346,50 @@ int main(int argc, char *argv[]) {
 			exit(1);
 		}
 
-		currframe->datalen = recv(sock, &currframe->packet, plen, 0);
-		if (currframe->datalen != plen) {
-			perror("recv");
+		errno = 0;
+		currframe->datalen = recvfrom(sock, &currframe->packet, plen, 0, (struct sockaddr *) &addrin, &addrinlen);
+		if (currframe->datalen != plen || addrinlen != sizeof(addrin)) {
+			perror("recvfrom");
 			free(currframe);
 			exit(1);
 		}
 
-		currframe->datalen -= offsetof(struct azzp, data);
+		struct timespec time_recv;
+		clock_gettime(CLOCK_REALTIME, &time_recv);
+
+		currframe->datalen -= sizeof(struct timep);
 		currframe->packet.tv_sec = be64toh(currframe->packet.tv_sec);
 		currframe->packet.tv_nsec = be32toh(currframe->packet.tv_nsec);
+
+		if (currframe->datalen == sizeof(struct timep)) {
+			struct timep2 *timepacket = (struct timep2 *)&currframe->packet;
+			if (last_time_sent.tv_sec != 0 && timepacket->t1.tv_sec == last_time_sent.tv_sec && timepacket->t1.tv_nsec == last_time_sent.tv_nsec) {
+				struct timespec time_serv;
+				time_serv.tv_sec = be64toh(timepacket->t2.tv_sec);
+				time_serv.tv_nsec = be32toh(timepacket->t2.tv_nsec);
+
+				int64_t server_time_diff = (int64_t)time_serv.tv_sec - (((int64_t)last_time_sent.tv_sec + (int64_t)time_recv.tv_sec) / 2);
+				server_time_diff *= 1000000000;
+				server_time_diff += (int64_t)time_serv.tv_nsec - (((int64_t)last_time_sent.tv_nsec + (int64_t)time_recv.tv_nsec) / 2);
+
+				pthread_mutex_lock(&time_mutex);
+				server_time_diff_global = server_time_diff;
+				pthread_mutex_unlock(&time_mutex);
+
+				printverbose("Time packet received! sent = %ld.%09lu, serv = %ld.%09lu, recv = %ld.%09lu, diff = %+011"PRIi64"\n", last_time_sent.tv_sec, last_time_sent.tv_nsec, time_serv.tv_sec, time_serv.tv_nsec, time_recv.tv_sec, time_recv.tv_nsec, server_time_diff);
+			} else {
+				fprintf(stderr, "Invalid time packet received!\n");
+			}
+			continue;
+		} else if (enable_time_sync && last_time_sent.tv_sec != time_recv.tv_sec) {
+			struct timep timepacket;
+			clock_gettime(CLOCK_REALTIME, &last_time_sent);
+			timepacket.tv_sec = htobe64(last_time_sent.tv_sec);
+			timepacket.tv_nsec = htobe32(last_time_sent.tv_nsec);
+			if (sendto(sock, &timepacket, sizeof(struct timep), 0, (struct sockaddr *) &addrin, sizeof(addrin)) < 0) {
+				perror("sendto");
+			}
+		}
 
 		pthread_mutex_lock(&audio_mutex);
 		if (audio_buffer && ((currframe->packet.tv_sec < audio_buffer->packet.tv_sec) || (currframe->packet.tv_sec == audio_buffer->packet.tv_sec && currframe->packet.tv_nsec < audio_buffer->packet.tv_nsec)) && ((currframe->packet.tv_sec <= last_packet_clock.tv_sec) || (currframe->packet.tv_sec == last_packet_clock.tv_sec && currframe->packet.tv_nsec <= last_packet_clock.tv_nsec))) {
