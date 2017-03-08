@@ -2,7 +2,7 @@
 
 **Transmit and receive audio via UDP unicast or multicast, using the Opus codec.**
 
-**Copyright (C) 2014-2016 Vittorio Gambaletta**
+**Copyright (C) 2014-2017 Vittorio Gambaletta**
 
 ## mtx
 ```

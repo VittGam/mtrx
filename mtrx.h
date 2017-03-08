@@ -1,6 +1,6 @@
 /*
  * mtrx - Transmit and receive audio via UDP unicast or multicast
- * Copyright (C) 2014-2016 Vittorio Gambaletta <openwrt@vittgam.net>
+ * Copyright (C) 2014-2017 Vittorio Gambaletta <openwrt@vittgam.net>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -88,63 +88,18 @@ struct mapporc {
 	} \
 }
 
-static void set_realtime_prio() {
-	struct sched_param sp;
-	if (sched_getparam(0, &sp)) {
-		perror("sched_getparam");
-	} else if ((sp.sched_priority = 80) > sched_get_priority_max(SCHED_FIFO)) {
-		fprintf(stderr, "System does not support realtime priority\n");
-	} else if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
-		perror("sched_setscheduler");
-	}
-}
+extern char *addr;
+extern unsigned long int port;
+extern char *device;
+extern unsigned long int use_float;
+extern unsigned long int rate;
+extern unsigned long int channels;
+extern unsigned long int audio_packet_duration;
+extern unsigned long int buffermult;
+extern unsigned long int enable_time_sync;
+extern unsigned long int verbose;
 
-static void drop_privs_if_needed() {
-	if (getuid() != 0 && geteuid() != 0) {
-		return;
-	}
-	errno = 0;
-	struct passwd *pw = getpwnam("nobody");
-	if (pw && pw->pw_uid > 0 && pw->pw_gid > 0) {
-		errno = 0;
-		if (setgid(pw->pw_gid)) {
-			perror("setgid");
-			exit(1);
-		}
-		errno = 0;
-		if (setuid(pw->pw_uid)) {
-			perror("setuid");
-			exit(1);
-		}
-	} else {
-		perror("getpwnam: user nobody not found");
-		exit(1);
-	}
-	fprintf(stderr, "Successfully dropped root privileges\n");
-}
-
-static snd_pcm_t *snd_my_init(char *device, int direction, unsigned long int rate, unsigned long int channels, unsigned long int use_float, snd_pcm_uframes_t *buffer, unsigned long int buffermult) {
-	snd_pcm_t *snd = NULL;
-	int dir = 0;
-	snd_pcm_hw_params_t *hw;
-	snd_pcm_sw_params_t *sw;
-	snd_pcm_hw_params_alloca(&hw);
-	snd_pcm_sw_params_alloca(&sw);
-	snd_callcheck(snd_pcm_open, &snd, device, direction, direction == SND_PCM_STREAM_PLAYBACK ? SND_PCM_NONBLOCK : 0);
-	snd_callcheck(snd_pcm_hw_params_any, snd, hw);
-	snd_callcheck(snd_pcm_hw_params_set_rate_resample, snd, hw, 0);
-	snd_callcheck(snd_pcm_hw_params_set_access, snd, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
-	snd_callcheck(snd_pcm_hw_params_set_format, snd, hw, use_float ? SND_PCM_FORMAT_FLOAT : SND_PCM_FORMAT_S16);
-	snd_callcheck(snd_pcm_hw_params_set_rate, snd, hw, rate, 0);
-	snd_callcheck(snd_pcm_hw_params_set_channels, snd, hw, channels);
-	snd_pcm_uframes_t samples = *buffer;
-	snd_callcheck(snd_pcm_hw_params_set_period_size_near, snd, hw, buffer, &dir);
-	*buffer *= buffermult;
-	snd_callcheck(snd_pcm_hw_params_set_buffer_size_near, snd, hw, buffer);
-	snd_callcheck(snd_pcm_hw_params, snd, hw);
-	snd_callcheck(snd_pcm_sw_params_current, snd, sw);
-	snd_callcheck(snd_pcm_sw_params_set_start_threshold, snd, sw, direction == SND_PCM_STREAM_PLAYBACK ? *buffer : samples);
-	snd_callcheck(snd_pcm_sw_params_set_stop_threshold, snd, sw, direction == SND_PCM_STREAM_PLAYBACK ? *buffer - samples : *buffer);
-	snd_callcheck(snd_pcm_sw_params, snd, sw);
-	return snd;
-}
+extern void set_realtime_prio();
+extern void drop_privs_if_needed();
+extern int init_socket(int is_mrx);
+extern snd_pcm_t *snd_my_init(char *device, int direction, unsigned long int rate, unsigned long int channels, unsigned long int use_float, snd_pcm_uframes_t *buffer, unsigned long int buffermult);

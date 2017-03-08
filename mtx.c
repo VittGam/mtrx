@@ -1,6 +1,6 @@
 /*
  * mtrx - Transmit and receive audio via UDP unicast or multicast
- * Copyright (C) 2014-2016 Vittorio Gambaletta <openwrt@vittgam.net>
+ * Copyright (C) 2014-2017 Vittorio Gambaletta <openwrt@vittgam.net>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,17 +18,7 @@
 
 #include "mtrx.h"
 
-char *addr = "239.48.48.1";
-unsigned long int port = 1350;
-char *device = "default";
-unsigned long int use_float = 0;
-unsigned long int rate = 48000;
-unsigned long int channels = 2;
-unsigned long int audio_packet_duration = 20;
-unsigned long int kbps = 128;
-unsigned long int buffermult = 3;
-unsigned long int enable_time_sync = 1;
-unsigned long int verbose = 0;
+static unsigned long int kbps = 128;
 
 static void *time_sync_thread(void *arg) {
 	printverbose("Time sync thread started\n");
@@ -63,7 +53,8 @@ static void *time_sync_thread(void *arg) {
 }
 
 int main(int argc, char *argv[]) {
-	fprintf(stderr, "mtx - Transmit audio via UDP unicast or multicast\nCopyright (C) 2014-2016 Vittorio Gambaletta <openwrt@vittgam.net>\n\n");
+	fprintf(stderr, "mtx - Transmit audio via UDP unicast or multicast\n");
+	fprintf(stderr, "Copyright (C) 2014-2017 Vittorio Gambaletta <openwrt@vittgam.net>\n\n");
 
 	while (1) {
 		int c = getopt(argc, argv, "h:p:d:f:r:c:t:k:b:v:");
@@ -109,29 +100,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	int sock = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sock < 0) {
-		perror("socket");
-		exit(1);
-	}
-
-	unsigned int iptos = IPTOS_DSCP_EF;
-	if (setsockopt(sock, IPPROTO_IP, IP_TOS, &iptos, sizeof(iptos)) < 0) {
-		perror("setsockopt(IP_TOS)");
-		exit(1);
-	}
-
-	{
-		struct sockaddr_in addrin;
-		memset(&addrin, 0, sizeof(addrin));
-		addrin.sin_family = AF_INET;
-		addrin.sin_addr.s_addr = htonl(INADDR_ANY);
-		addrin.sin_port = 0;
-		if (bind(sock, (struct sockaddr *) &addrin, sizeof(addrin)) < 0) {
-			perror("bind");
-			exit(1);
-		}
-	}
+	int sock = init_socket(0);
 
 	set_realtime_prio();
 

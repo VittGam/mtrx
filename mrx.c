@@ -1,6 +1,6 @@
 /*
  * mtrx - Transmit and receive audio via UDP unicast or multicast
- * Copyright (C) 2014-2016 Vittorio Gambaletta <openwrt@vittgam.net>
+ * Copyright (C) 2014-2017 Vittorio Gambaletta <openwrt@vittgam.net>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,24 +18,12 @@
 
 #include "mtrx.h"
 
-char *addr = "239.48.48.1";
-unsigned long int port = 1350;
-char *device = "default";
-unsigned long int use_float = 0;
-unsigned long int rate = 48000;
-unsigned long int channels = 2;
-unsigned long int audio_packet_duration = 20;
-unsigned long int buffermult = 3;
-signed long int delay = 80;
-unsigned long int enable_time_sync = 1;
-unsigned long int verbose = 0;
-
-struct azz *audio_buffer = NULL;
-pthread_mutex_t audio_mutex, time_mutex;
-struct timespec last_packet_clock = {0, 0};
-int64_t server_time_diff_global = 0;
-
-pthread_barrier_t init_barrier;
+static signed long int delay = 80;
+static struct azz *audio_buffer = NULL;
+static pthread_barrier_t init_barrier;
+static pthread_mutex_t audio_mutex, time_mutex;
+static struct timespec last_packet_clock = {0, 0};
+static int64_t server_time_diff_global = 0;
 
 static void *audio_playback_thread(void *arg) {
 	printverbose("Audio playback thread started\n");
@@ -203,54 +191,9 @@ static void *audio_playback_thread(void *arg) {
 	return NULL;
 }
 
-static int init_socket() {
-	int sock = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sock < 0) {
-		perror("socket");
-		exit(1);
-	}
-
-	struct ip_mreq mreq;
-	mreq.imr_multiaddr.s_addr = inet_addr(addr);
-	int is_multicast = (ntohl(mreq.imr_multiaddr.s_addr) & 0xf0000000) == 0xe0000000;
-
-	if (is_multicast) {
-		unsigned int one = 1;
-		if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) < 0) {
-			perror("setsockopt(SO_REUSEADDR)");
-			exit(1);
-		}
-	}
-
-	unsigned int iptos = IPTOS_DSCP_EF;
-	if (setsockopt(sock, IPPROTO_IP, IP_TOS, &iptos, sizeof(iptos)) < 0) {
-		perror("setsockopt(IP_TOS)");
-		exit(1);
-	}
-
-	struct sockaddr_in addrin;
-	memset(&addrin, 0, sizeof(addrin));
-	addrin.sin_family = AF_INET;
-	addrin.sin_addr.s_addr = htonl(INADDR_ANY);
-	addrin.sin_port = htons((uint16_t) port);
-	if (bind(sock, (struct sockaddr *) &addrin, sizeof(addrin)) < 0) {
-		perror("bind");
-		exit(1);
-	}
-
-	if (is_multicast) {
-		mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-		if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
-			perror("setsockopt(IP_ADD_MEMBERSHIP)");
-			exit(1);
-		}
-	}
-
-	return sock;
-}
-
 int main(int argc, char *argv[]) {
-	fprintf(stderr, "mrx - Receive audio via UDP unicast or multicast\nCopyright (C) 2014-2016 Vittorio Gambaletta <openwrt@vittgam.net>\n\n");
+	fprintf(stderr, "mrx - Receive audio via UDP unicast or multicast\n");
+	fprintf(stderr, "Copyright (C) 2014-2017 Vittorio Gambaletta <openwrt@vittgam.net>\n\n");
 
 	while (1) {
 		int c = getopt(argc, argv, "h:p:d:f:r:c:t:b:e:T:v:");
@@ -296,7 +239,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	int sock = init_socket();
+	int sock = init_socket(1);
 
 	set_realtime_prio();
 
