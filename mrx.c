@@ -61,7 +61,7 @@ static void *audio_playback_thread(void *arg) {
 		delay2 += (int64_t) buffer * 1000000000 / rate;
 		delay -= (int64_t) buffer * 1000 / rate;
 	}
-	int64_t delay1 = (int64_t) (abs(delay2) % clock_period) * (delay2 < 0 ? 1 : -1);
+	int64_t delay1 = (int64_t) ((delay2 < 0 ? -delay2 : delay2) % clock_period) * (delay2 < 0 ? 1 : -1);
 
 	if (delay < 0) {
 		fprintf(stderr, "Total audio delay minus ALSA delay (%ld) cannot be negative.\n", delay);
