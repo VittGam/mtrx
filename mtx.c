@@ -157,7 +157,9 @@ int main(int argc, char *argv[]) {
 				snd_pcm_avail_delay(snd, &availp, &delayp);
 				printverbose("availp %ld %ld / %ld %ld\n", buffer, samples, availp, delayp);
 				// one of the many ways alsa-pulse is broken, is that capture buffer overrun is not properly detected and reported...
-				if (delayp > buffer) {
+				if (delayp < 0) {
+					resync = 1;
+				} else if (delayp > buffer) {
 					// one of the many ways alsa-pulse is broken, is that it does not implement snd_pcm_reset...
 					while (delayp > samples) {
 						printverbose("%d bad delayp %ld %ld, draining\n", snd_pcm_state(snd), availp, delayp);
