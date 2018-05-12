@@ -19,6 +19,7 @@
 #include "mtrx.h"
 
 static unsigned long int kbps = 128;
+static unsigned long int use_rtp = 0;
 
 static void *time_sync_thread(void *arg) {
 	printverbose("Time sync thread started\n");
@@ -57,7 +58,7 @@ int main(int argc, char *argv[]) {
 	fprintf(stderr, "Copyright (C) 2014-2017 Vittorio Gambaletta <openwrt@vittgam.net>\n\n");
 
 	while (1) {
-		int c = getopt(argc, argv, "h:p:d:f:r:c:t:k:b:v:T:");
+		int c = getopt(argc, argv, "h:p:d:f:r:c:t:k:b:v:T:R:");
 		if (c == -1) {
 			break;
 		} else if (c == 'h') {
@@ -66,6 +67,8 @@ int main(int argc, char *argv[]) {
 			port = strtoul(optarg, NULL, 10);
 		} else if (c == 'd') {
 			device = optarg;
+		} else if (c == 'R') {
+			use_rtp = strtoul(optarg, NULL, 10);
 		} else if (c == 'f') {
 			use_float = strtoul(optarg, NULL, 10);
 		} else if (c == 'r') {
@@ -87,6 +90,7 @@ int main(int argc, char *argv[]) {
 			fprintf(stderr, "    -h <addr>   IP address (default: %s)\n", addr);
 			fprintf(stderr, "    -p <port>   UDP port (default: %lu)\n", port);
 			fprintf(stderr, "    -d <dev>    ALSA device name, or '-' for stdin (default: '%s')\n", device);
+			fprintf(stderr, "    -R <n>      RTP output (default: %lu)\n", use_rtp);
 			fprintf(stderr, "    -f <n>      Use float samples (1) or signed 16 bit integer samples (0) (default: %lu)\n", use_float);
 			fprintf(stderr, "    -r <rate>   Audio sample rate (default: %lu Hz)\n", rate);
 			fprintf(stderr, "    -c <n>      Audio channel count (default: %lu)\n", channels);
@@ -98,6 +102,11 @@ int main(int argc, char *argv[]) {
 			fprintf(stderr, "\n");
 			exit(1);
 		}
+	}
+
+	if (use_rtp && enable_time_sync) {
+		fprintf(stderr, "Disabling time synchronization due to RTP output.\n");
+		enable_time_sync = 0;
 	}
 
 	int sock = init_socket(0);
@@ -139,12 +148,39 @@ int main(int argc, char *argv[]) {
 	}
 
 	void *pcm = alloca(pcm_size);
-	struct azzp *packet = alloca(bytes_per_frame + sizeof(struct timep));
+	struct azzp *azzp_packet = NULL;
+	struct rtp *rtp_packet = NULL;
+	if (use_rtp) {
+		rtp_packet = (struct rtp *)alloca(bytes_per_frame + sizeof(struct rtp) - 1);
+	} else {
+		azzp_packet = (struct azzp *)alloca(bytes_per_frame + sizeof(struct azzp) - 1);
+	}
 
 	struct timespec clock = {0, 0};
 	int resync = 1;
 
 	drop_privs_if_needed();
+
+	// Used for RTP only.
+	srand(time(NULL));
+	uint16_t rtp_seq = rand();
+	uint32_t ssrc = rand();
+	uint32_t ts = 0;
+
+	if (use_rtp) {
+		printf("SDP file for this stream:\n\n");
+		printf("v=0\n");
+		printf("o=- 0 0 IN IP4 127.0.0.1\n");
+		printf("s=No Name\n");
+		printf("c=IN IP4 %s\n", addr);
+		printf("t=0 0\n");
+		printf("a=tool:mtx\n");
+		printf("m=audio %ld RTP/AVP 96\n", port);
+		printf("b=AS:96\n");
+		printf("a=rtpmap:96 opus/48000/%lu\n", channels);
+		printf("a=fmtp:96 sprop-stereo=%d\n", channels > 1);
+		printf("a=control:streamid=0\n\n");
+	}
 
 	while (1) {
 		printverbose("clock %ld.%09lu\n", clock.tv_sec, clock.tv_nsec);
@@ -204,11 +240,13 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
+		unsigned char *data = use_rtp ? &rtp_packet->data : &azzp_packet->data;
+
 		ssize_t z;
 		if (use_float) {
-			z = opus_encode_float(encoder, pcm, samples, &packet->data, bytes_per_frame);
+			z = opus_encode_float(encoder, pcm, samples, data, bytes_per_frame);
 		} else {
-			z = opus_encode(encoder, pcm, samples, &packet->data, bytes_per_frame);
+			z = opus_encode(encoder, pcm, samples, data, bytes_per_frame);
 		}
 		if (z < 0) {
 			fprintf(stderr, "opus_encode: %s\n", opus_strerror(z));
@@ -236,12 +274,26 @@ int main(int argc, char *argv[]) {
 		printverbose("resync %lld %d\n", (((1000000000LL * (now.tv_sec - clock.tv_sec)) + (now.tv_nsec - clock.tv_nsec))), resync);
 		clock = now;
 
-		packet->tv_sec = htobe64(now.tv_sec);
-		packet->tv_nsec = htobe32(now.tv_nsec);
+		if (use_rtp) {
+			rtp_packet->version_p_x_cc = (2 << 6);  // Version 2, the other fields are zero.
+			rtp_packet->marker_and_pt = 96;  // First ID that's dynamically allocated.
+			rtp_packet->seq = htobe16(rtp_seq++);
+			rtp_packet->timestamp = htobe32(ts);
+			rtp_packet->ssrc = htobe32(ssrc);
+			ts += samples;
 
-		if (sendto(sock, packet, z + sizeof(struct timep), 0, (struct sockaddr *) &addrin, sizeof(addrin)) < 0) {
-			perror("sendto");
-			exit(1);
+			if (sendto(sock, rtp_packet, z + sizeof(struct rtp) - 1, 0, (struct sockaddr *) &addrin, sizeof(addrin)) < 0) {
+				perror("sendto");
+				exit(1);
+			}
+		} else {
+			azzp_packet->tv_sec = htobe64(now.tv_sec);
+			azzp_packet->tv_nsec = htobe32(now.tv_nsec);
+
+			if (sendto(sock, azzp_packet, z + sizeof(struct azzp) - 1, 0, (struct sockaddr *) &addrin, sizeof(addrin)) < 0) {
+				perror("sendto");
+				exit(1);
+			}
 		}
 	}
 
