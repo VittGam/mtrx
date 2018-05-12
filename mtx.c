@@ -57,7 +57,7 @@ int main(int argc, char *argv[]) {
 	fprintf(stderr, "Copyright (C) 2014-2017 Vittorio Gambaletta <openwrt@vittgam.net>\n\n");
 
 	while (1) {
-		int c = getopt(argc, argv, "h:p:d:f:r:c:t:k:b:v:");
+		int c = getopt(argc, argv, "h:p:d:f:r:c:t:k:b:v:T:");
 		if (c == -1) {
 			break;
 		} else if (c == 'h') {
