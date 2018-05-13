@@ -41,6 +41,15 @@ struct __attribute__((__packed__)) azzp {
 	unsigned char data;
 };
 
+struct __attribute__((__packed__)) rtp {
+	uint8_t version_p_x_cc;
+	uint8_t marker_and_pt;
+	uint16_t seq;
+	uint32_t timestamp;
+	uint32_t ssrc;
+	unsigned char data;
+};
+
 struct __attribute__((__packed__)) timep {
 	int64_t tv_sec;
 	uint32_t tv_nsec;

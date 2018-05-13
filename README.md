@@ -11,6 +11,7 @@ Usage: mtx [<options>]
     -h <addr>   IP address (default: 239.48.48.1)
     -p <port>   UDP port (default: 1350)
     -d <dev>    ALSA device name, or '-' for stdin (default: 'default')
+    -R <n>      RTP output (default: 0)
     -f <n>      Use float samples (1) or signed 16 bit integer samples (0) (default: 0)
     -r <rate>   Audio sample rate (default: 48000 Hz)
     -c <n>      Audio channel count (default: 2)
@@ -69,6 +70,17 @@ pcm.pnm {
 - If having problems try **`sudo ./mrx -d pulse`**
 - On OpenWrt and/or with cheap USB audio cards without PulseAudio, if it doesn't work try **`mrx -d plughw:0,0`**
 - It shouldn't be needed anymore, but it might still be useful, so [this is a working `/etc/asound.conf` file for OpenWrt with cheap USB audio cards](https://gist.github.com/VittGam/ad0c1ce0143e4fb7a55fe8947b085e26)
+
+### RTP
+
+RTP output is useful for transmitting to other applications, e.g. FFmpeg.
+You don't need any PulseAudio integration; just run mtx with -R 1 and
+-d etc. as usual. This will output an SDP file, which you can run in e.g.
+ffplay with
+
+```
+ffplay -protocol_whitelist rtp,file,udp -i mtx.sdp
+```
 
 ## Bugs
 
